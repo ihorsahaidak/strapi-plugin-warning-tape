@@ -7,6 +7,9 @@ const STYLE_ID = 'strapi-warning-tape-styles';
 // is 28 / cos(45°) across the width. Slide by exactly that and no seam shows.
 const STRIPE_PERIOD = 39.6;
 
+/** ~40 fast tries then a 2s heartbeat, giving up after about ten minutes. */
+const MAX_RETRIES = 340;
+
 const CSS = `
 .${CLASS} {
   position: relative;
@@ -158,13 +161,18 @@ export function createTape(config: TapeConfig): TapeHandle {
   const layout = () => {
     const width = element.clientWidth;
 
-    // Not laid out yet (still detached, or the tab was never painted): come back
-    // for it. Timers fire in a background tab; requestAnimationFrame does not.
+    // Not laid out yet: still detached, or in a tab the browser has never
+    // rendered. Come back for it on a timer — in a hidden tab, timers are the
+    // only thing that still runs. requestAnimationFrame does not, and neither
+    // does ResizeObserver, so this is also the only way back from a tape that
+    // was built while the tab was in the background.
     if (!width) {
-      if (retry > 40) return;
+      if (retry > MAX_RETRIES) return;
+      // Try hard for the first few seconds, then settle into a slow heartbeat.
+      const delay = retry < 40 ? 100 : 2000;
       retry += 1;
       window.clearTimeout(timer);
-      timer = window.setTimeout(layout, 100);
+      timer = window.setTimeout(layout, delay);
       return;
     }
 
@@ -229,15 +237,22 @@ export function createTape(config: TapeConfig): TapeHandle {
   update(config);
 
   // The tape's own box never changes when we fill it (fixed height, hidden
-  // overflow), so measuring from here cannot loop.
+  // overflow), so measuring from here cannot loop. The observer only delivers
+  // while the tab renders, hence the two listeners next to it.
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(layout);
   observer?.observe(element);
+
+  const relayout = () => layout();
+  window.addEventListener('resize', relayout);
+  document.addEventListener('visibilitychange', relayout);
 
   return {
     element,
     update,
     destroy() {
       window.clearTimeout(timer);
+      window.removeEventListener('resize', relayout);
+      document.removeEventListener('visibilitychange', relayout);
       observer?.disconnect();
       element.remove();
     },
