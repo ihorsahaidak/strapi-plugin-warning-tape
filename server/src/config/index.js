@@ -12,6 +12,8 @@ const defaults = {
   readOnly: false,
   /** Serve the tape config to anonymous callers, so it shows on the login screen. */
   public: true,
+  /** Run on a Strapi major this plugin was not written for, at your own risk. */
+  ignoreVersionCheck: false,
   env: null,
   message: null,
   backgroundColor: null,
@@ -31,7 +33,7 @@ const validator = (config = {}) => {
     throw new Error(`[warning-tape] config.${key} is invalid — expected ${expected}.`);
   };
 
-  for (const key of ['enabled', 'readOnly', 'public', 'stripes', 'pauseOnHover']) {
+  for (const key of ['enabled', 'readOnly', 'public', 'stripes', 'pauseOnHover', 'ignoreVersionCheck']) {
     if (config[key] != null && bool(config[key], null) === null) bad(key, 'a boolean');
   }
   for (const key of ['backgroundColor', 'textColor']) {

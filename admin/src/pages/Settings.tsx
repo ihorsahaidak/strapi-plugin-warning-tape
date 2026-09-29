@@ -7,19 +7,19 @@ import {
   Flex,
   Grid,
   NumberInput,
-  SingleSelect,
-  SingleSelectOption,
   Switch,
   TextInput,
   Typography,
 } from '@strapi/design-system';
-import { Check, ArrowClockwise } from '@strapi/icons';
+import { ArrowClockwise, Check } from '@strapi/icons';
 import { Layouts, Page, useFetchClient, useNotification } from '@strapi/strapi/admin';
 
+import Boundary from '../components/Boundary';
 import ColorField from '../components/ColorField';
 import TapePreview from '../components/TapePreview';
 import pluginId from '../pluginId';
 import { refreshTape } from '../tape/mount';
+import { readFailures } from '../utils/adminState';
 import type { TapeConfig, TapeDescription, TapeSettings } from '../utils/types';
 
 const expand = (message: string, envLabel: string) => message.split('{env}').join(envLabel);
@@ -38,9 +38,10 @@ const previewConfig = (data: TapeDescription, draft: TapeSettings): TapeConfig =
     textColor: draft.textColor ?? data.auto.textColor,
     speed: draft.speed,
     height: draft.height,
-    position: draft.position,
     stripes: draft.stripes,
-    pauseOnHover: draft.pauseOnHover,
+    // Not editable here — whatever config/plugins says.
+    position: data.resolved.position,
+    pauseOnHover: data.resolved.pauseOnHover,
   };
 };
 
@@ -50,13 +51,22 @@ const Card = ({ children }: { children: React.ReactNode }) => (
   </Box>
 );
 
-const SettingsPage = () => {
+const Chip = ({ children }: { children: React.ReactNode }) => (
+  <Box background="neutral150" padding={1} paddingLeft={2} paddingRight={2} hasRadius>
+    <Typography variant="pi" fontWeight="bold" textColor="neutral700">
+      {children}
+    </Typography>
+  </Box>
+);
+
+const SettingsContent = () => {
   const { get, put, post } = useFetchClient();
   const { toggleNotification } = useNotification();
 
   const [data, setData] = React.useState<TapeDescription | null>(null);
   const [draft, setDraft] = React.useState<TapeSettings | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const apply = (body: unknown) => {
     const description = body as TapeDescription;
@@ -64,23 +74,32 @@ const SettingsPage = () => {
     setDraft(description.settings);
   };
 
-  const load = React.useCallback(
-    (promise: Promise<{ data: unknown }>) =>
-      promise
-        .then(({ data: body }) => apply(body))
-        .catch(() => {
-          toggleNotification({ type: 'danger', message: 'Could not load the warning tape settings.' });
-        }),
-    [toggleNotification]
-  );
-
   React.useEffect(() => {
-    void load(get(`/${pluginId}/settings`));
-  }, [get, load]);
+    get(`/${pluginId}/settings`)
+      .then(({ data: body }) => apply(body))
+      .catch((error: any) => {
+        setLoadError(error?.message ?? 'The settings could not be loaded.');
+      });
+  }, [get]);
+
+  if (loadError) {
+    return (
+      <Box padding={8}>
+        <Alert title="The warning tape settings could not be loaded" variant="danger" closeLabel="Close">
+          {loadError}
+        </Alert>
+      </Box>
+    );
+  }
 
   if (!data || !draft) return <Page.Loading />;
 
   const locked = data.readOnly;
+  const compatibility = data.status?.compatibility;
+  const switchedOff = compatibility ? !compatibility.ok : false;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(data.settings);
+  const adminFailures = readFailures();
+
   const set = <K extends keyof TapeSettings>(key: K, value: TapeSettings[K]) =>
     setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
 
@@ -120,6 +139,7 @@ const SettingsPage = () => {
           subtitle="A strip of hazard tape across the admin, scrolling a message of your choice — so nobody edits pre-production thinking it is production."
           primaryAction={
             <Flex gap={2}>
+              {dirty ? <Chip>Unsaved</Chip> : null}
               <Button
                 variant="tertiary"
                 startIcon={<ArrowClockwise />}
@@ -128,7 +148,12 @@ const SettingsPage = () => {
               >
                 Reset
               </Button>
-              <Button startIcon={<Check />} loading={saving} disabled={locked} onClick={save}>
+              <Button
+                startIcon={<Check />}
+                loading={saving}
+                disabled={locked || !dirty}
+                onClick={save}
+              >
                 Save
               </Button>
             </Flex>
@@ -136,46 +161,49 @@ const SettingsPage = () => {
         />
         <Layouts.Content>
           <Flex direction="column" alignItems="stretch" gap={4}>
+            {switchedOff ? (
+              <Alert
+                title="The tape has switched itself off"
+                variant="danger"
+                closeLabel="Close"
+              >
+                {compatibility?.reason}
+              </Alert>
+            ) : null}
+
+            {data.resolved.warning ? (
+              <Alert title="The tape is running with a problem" variant="warning" closeLabel="Close">
+                {data.resolved.warning}
+              </Alert>
+            ) : null}
+
+            {adminFailures.length > 0 ? (
+              <Alert title="Something went wrong in this browser" variant="warning" closeLabel="Close">
+                {adminFailures.map((failure) => `${failure.where}: ${failure.message}`).join(' · ')}
+              </Alert>
+            ) : null}
+
             {locked ? (
-              <Alert closeLabel="Close" title="Locked by the server configuration" variant="default">
-                `warning-tape` runs with `readOnly: true` in config/plugins, so the tape is
-                whatever that file says and these fields are read-only.
+              <Alert title="Locked by the server configuration" variant="default" closeLabel="Close">
+                warning-tape runs with readOnly: true in config/plugins, so the tape is whatever that
+                file says and these fields cannot be changed here.
               </Alert>
             ) : null}
 
             <Card>
               <Flex direction="column" alignItems="stretch" gap={3}>
-                <Flex justifyContent="space-between" alignItems="center">
-                  <Typography variant="delta" tag="h2">
-                    Preview
-                  </Typography>
-                  <Flex gap={2} alignItems="center">
-                    <Typography variant="pi" textColor="neutral600">
-                      Environment
-                    </Typography>
-                    <Box
-                      background="neutral150"
-                      padding={1}
-                      paddingLeft={2}
-                      paddingRight={2}
-                      hasRadius
-                    >
-                      <Typography variant="pi" fontWeight="bold">
-                        {data.env}
-                      </Typography>
-                    </Box>
-                  </Flex>
-                </Flex>
+                <Typography variant="sigma" textColor="neutral600">
+                  Preview
+                </Typography>
                 <Box overflow="hidden" hasRadius>
                   <TapePreview config={previewConfig(data, draft)} />
                 </Box>
-                <Typography variant="pi" textColor="neutral600">
-                  Detected from {data.envSources.join(', ')} — the first one that is set wins, and
-                  `env` in config/plugins overrides them all.{' '}
-                  {data.envPreset
-                    ? `Matched the "${data.envPreset}" preset.`
-                    : 'No preset matched this name, so the automatic colours are the neutral ones.'}
-                </Typography>
+                {switchedOff ? (
+                  <Typography variant="pi" textColor="neutral600">
+                    Nothing is drawn in the admin while the tape is off — this is what it would look
+                    like once the plugin is updated.
+                  </Typography>
+                ) : null}
               </Flex>
             </Card>
 
@@ -244,32 +272,18 @@ const SettingsPage = () => {
                     />
                   </Grid.Item>
                 </Grid.Root>
+
               </Flex>
             </Card>
 
             <Card>
               <Flex direction="column" alignItems="stretch" gap={5}>
                 <Typography variant="delta" tag="h2">
-                  Look and motion
+                  Size and speed
                 </Typography>
 
                 <Grid.Root gap={5}>
-                  <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
-                    <Field.Root name="position">
-                      <Field.Label>Position</Field.Label>
-                      <SingleSelect
-                        disabled={locked}
-                        value={draft.position}
-                        onChange={(value: string | number) =>
-                          set('position', value === 'bottom' ? 'bottom' : 'top')
-                        }
-                      >
-                        <SingleSelectOption value="top">Top of the admin</SingleSelectOption>
-                        <SingleSelectOption value="bottom">Bottom of the admin</SingleSelectOption>
-                      </SingleSelect>
-                    </Field.Root>
-                  </Grid.Item>
-                  <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
+                  <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
                     <Field.Root name="height" hint="12 to 120 pixels.">
                       <Field.Label>Height</Field.Label>
                       <NumberInput
@@ -280,7 +294,7 @@ const SettingsPage = () => {
                       <Field.Hint />
                     </Field.Root>
                   </Grid.Item>
-                  <Grid.Item col={4} s={12} direction="column" alignItems="stretch">
+                  <Grid.Item col={6} s={12} direction="column" alignItems="stretch">
                     <Field.Root name="speed" hint="Pixels per second, 1 to 1000.">
                       <Field.Label>Scrolling speed</Field.Label>
                       <NumberInput
@@ -293,29 +307,16 @@ const SettingsPage = () => {
                   </Grid.Item>
                 </Grid.Root>
 
-                <Flex gap={6} wrap="wrap">
-                  <Flex gap={3} alignItems="center">
-                    <Switch
-                      checked={draft.stripes}
-                      onCheckedChange={(checked: boolean) => set('stripes', checked)}
-                      onLabel="On"
-                      offLabel="Off"
-                      disabled={locked}
-                      aria-label="Hazard stripes"
-                    />
-                    <Typography>Hazard stripes</Typography>
-                  </Flex>
-                  <Flex gap={3} alignItems="center">
-                    <Switch
-                      checked={draft.pauseOnHover}
-                      onCheckedChange={(checked: boolean) => set('pauseOnHover', checked)}
-                      onLabel="On"
-                      offLabel="Off"
-                      disabled={locked}
-                      aria-label="Pause on hover"
-                    />
-                    <Typography>Pause when the pointer is on it</Typography>
-                  </Flex>
+                <Flex gap={3} alignItems="center">
+                  <Switch
+                    checked={draft.stripes}
+                    onCheckedChange={(checked: boolean) => set('stripes', checked)}
+                    onLabel="On"
+                    offLabel="Off"
+                    disabled={locked}
+                    aria-label="Hazard stripes"
+                  />
+                  <Typography>Hazard stripes</Typography>
                 </Flex>
               </Flex>
             </Card>
@@ -325,5 +326,11 @@ const SettingsPage = () => {
     </Layouts.Root>
   );
 };
+
+const SettingsPage = () => (
+  <Boundary>
+    <SettingsContent />
+  </Boundary>
+);
 
 export default SettingsPage;

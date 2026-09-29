@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-warning-tape",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A police-tape banner across the top of the Strapi 5 admin with a scrolling message, so nobody mistakes preprod for production. Colour, text, speed and position are configurable; the environment name is detected server-side.",
   "keywords": [
     "admin",

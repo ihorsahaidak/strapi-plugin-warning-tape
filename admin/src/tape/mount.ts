@@ -1,4 +1,5 @@
 import { fetchTapeConfig } from '../utils/api';
+import { guard, recordFailure } from '../utils/adminState';
 import { createTape, type TapeHandle } from './render';
 import type { TapeConfig } from '../utils/types';
 
@@ -89,8 +90,12 @@ export async function refreshTape(): Promise<void> {
   window.clearTimeout(timer);
 
   try {
-    paint(await fetchTapeConfig());
+    const config = await fetchTapeConfig();
     retry = 0;
+    // From here on a failure is ours, not the network's: keep it, and leave the
+    // admin alone.
+    guard('drawing the tape', () => paint(config));
+    return;
   } catch {
     if (retry >= 6) return;
     const delay = Math.min(30000, 2000 * 2 ** retry);
@@ -100,7 +105,10 @@ export async function refreshTape(): Promise<void> {
 }
 
 export function mountTape(): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined') {
+    recordFailure('mounting the tape', 'no document — the admin bundle ran outside a browser');
+    return;
+  }
 
   const start = () => {
     void refreshTape();

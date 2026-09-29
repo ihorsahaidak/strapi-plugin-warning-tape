@@ -1,24 +1,53 @@
 'use strict';
 
+const compat = require('./utils/compat');
+const state = require('./utils/state');
+
 /**
- * `GET /warning-tape/config` is declared with `auth: false` so the tape can
- * render on the login screen. With `public: false` we put the admin policy back
- * here — routes are only mounted later, during bootstrap, so this still counts.
+ * Two things at boot, both written so that a failure switches the tape off
+ * rather than stopping Strapi:
+ *
+ * - check that this is a Strapi the plugin knows;
+ * - with `public: false`, put the admin policy back on `GET /config`, which is
+ *   declared with `auth: false` so the tape can render on the login screen.
  */
 module.exports = ({ strapi }) => {
-  if (strapi.plugin('warning-tape').service('settings').isPublic()) return;
+  const plugin = strapi.plugin('warning-tape');
+  const settings = plugin?.service?.('settings');
 
-  const route = strapi
-    .plugin('warning-tape')
-    .routes?.admin?.routes?.find((candidate) => candidate.path === '/config');
+  try {
+    const compatibility = settings
+      ? settings.compatibility()
+      : compat.check(strapi, { ignore: false });
 
-  if (route) {
-    route.config = { policies: ['admin::isAuthenticatedAdmin'] };
-  } else {
-    // The controller refuses anonymous callers on its own, so the config stays
-    // private — the tape simply will not render. Worth a line in the log.
-    strapi.log.warn(
-      '[warning-tape] could not find the /config route to protect; the tape will stay hidden.'
-    );
+    state.setCompatibility(compatibility);
+
+    if (!compatibility.ok) {
+      strapi.log.warn(`[warning-tape] ${compatibility.reason}`);
+      return;
+    }
+  } catch (error) {
+    state.recordFailure('checking the Strapi version', error);
+    strapi.log.warn(`[warning-tape] could not check the Strapi version: ${error.message}`);
+  }
+
+  try {
+    if (settings?.isPublic()) return;
+
+    const route = plugin.routes?.admin?.routes?.find((candidate) => candidate.path === '/config');
+
+    if (route) {
+      route.config = { policies: ['admin::isAuthenticatedAdmin'] };
+    } else {
+      // The controller refuses anonymous callers on its own, so the config stays
+      // private — the tape simply will not render. Worth a line in the log.
+      state.recordFailure('protecting the config route', new Error('route not found'));
+      strapi.log.warn(
+        '[warning-tape] could not find the /config route to protect; the tape will stay hidden.'
+      );
+    }
+  } catch (error) {
+    state.recordFailure('protecting the config route', error);
+    strapi.log.warn(`[warning-tape] could not protect the config route: ${error.message}`);
   }
 };

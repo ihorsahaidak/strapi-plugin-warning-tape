@@ -58,9 +58,11 @@ wherever it appears, so `Careful — this is {env}, not your laptop` works too.
 - **Message** — empty means the default; `{env}` expands.
 - **Background / Text** — empty means the preset for the detected environment, so
   the same setting keeps making sense on every deployment.
-- **Position** — top or bottom of the admin.
-- **Height** (12–120px) and **scrolling speed** (pixels per second).
-- **Hazard stripes** and **pause when the pointer is on it**.
+- **Height** (12–120px), **scrolling speed** (pixels per second) and **hazard stripes**.
+
+That is the whole page. Where the tape sits and whether it pauses under the pointer
+are decisions for a deployment, not for whoever is editing content that day, so
+they live in `config/plugins` only.
 
 These are stored in Strapi's core store, so everyone on that deployment sees the
 same tape. Colours and a message you leave on "automatic" are the ones that
@@ -83,11 +85,11 @@ export default ({ env }) => ({
       textColor: null,
       speed: 60,             // pixels per second
       height: 32,
-      position: 'top',       // or 'bottom'
       stripes: true,
-      pauseOnHover: true,
 
       // Only here
+      position: 'top',        // or 'bottom'
+      pauseOnHover: true,     // stop the marquee while the pointer is on it
       env: env('DEPLOY_ENV'), // overrides the detected environment name
       readOnly: env.bool('WARNING_TAPE_LOCKED', false),
       public: true,
@@ -99,6 +101,8 @@ export default ({ env }) => ({
 - **`readOnly`** ignores the stored settings entirely and makes the Settings page
   read-only: the file is the tape. Worth switching on in production, where the
   banner is not something an editor should be able to turn off.
+- **`ignoreVersionCheck`** (default `false`) runs the plugin on a Strapi major it
+  was not written for. See *Strapi upgrades* below.
 - **`public`** (default `true`) serves the banner before login, so the tape is
   there on the login screen — the moment you most want to know which environment
   you are typing a password into. It exposes nothing but the message, the colours
@@ -106,6 +110,29 @@ export default ({ env }) => ({
   the tape then appears once you are logged in.
 
 Bad values are rejected at boot with a message naming the option.
+
+## Strapi upgrades
+
+The plugin is written against the Strapi 5 plugin API (`>=5.0.0 <6.0.0`). On a
+major upgrade it does not try its luck: it switches itself off, leaves the admin
+untouched, and says why in **Settings → Warning Tape**, next to the Strapi version
+it found. The server logs one line at boot:
+
+```
+warn: [warning-tape] Strapi 6.0.0 is outside the range this version of
+strapi-plugin-warning-tape supports (>=5.0.0 <6.0.0), so the tape is switched off.
+```
+
+![The settings page when the tape has switched itself off](https://raw.githubusercontent.com/ihorsahaidak/strapi-plugin-warning-tape/main/docs/switched-off.png)
+
+Updating the plugin is the fix. If you would rather run it anyway — the admin API
+it uses may well still work — set `ignoreVersionCheck: true` in `config/plugins`.
+
+The same applies to anything else that goes wrong. A store it cannot read, a
+config route it cannot protect, an admin API that moved: each one is caught,
+reported on the settings page, and costs you a banner, never a working admin.
+Strapi never fails to boot, the admin never fails to render, and the settings
+page explains itself rather than going blank.
 
 ## Notes
 
